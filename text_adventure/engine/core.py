@@ -1,12 +1,22 @@
 """Tkinter-powered classroom adventure engine."""
 
+import importlib
+from importlib import util as importlib_util
 import random
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 from typing import Callable, Dict, List, Optional, Tuple
 
-from PIL import Image, ImageTk
+Image = None
+ImageTk = None
+PIL_AVAILABLE = False
+
+_pil_spec = importlib_util.find_spec("PIL")
+if _pil_spec is not None:
+    Image = importlib.import_module("PIL.Image")
+    ImageTk = importlib.import_module("PIL.ImageTk")
+    PIL_AVAILABLE = True
 
 from . import audio, save
 from .models import BattleAction, BattleSpec, RoomSpec, Stats
@@ -329,8 +339,8 @@ class GameApp:
         fallback_text = self._theme("window", "fallback_text", default="#ffffff") or "#ffffff"
         self._fallback_text_color = fallback_text
         self._fallback_font = ("Segoe UI", 24, "bold")
-        self._background_original: Optional[Image.Image] = None
-        self._background_photo: Optional[ImageTk.PhotoImage] = None
+        self._background_original: Optional[object] = None
+        self._background_photo: Optional[object] = None
         self._last_size: Tuple[int, int] = (0, 0)
 
         self.background_label = tk.Label(self.root, bg=window_bg, fg=fallback_text, anchor="center")
@@ -613,6 +623,13 @@ class GameApp:
             self.background_label.configure(text="No background image", **message_kwargs)
             self.background_label.image = None
             return
+        if not PIL_AVAILABLE:
+            self.background_label.configure(
+                text="Install Pillow to enable backgrounds.",
+                **message_kwargs,
+            )
+            self.background_label.image = None
+            return
         filename = self.images.get(key)
         if not filename:
             self.background_label.configure(text="Missing background", **message_kwargs)
@@ -641,7 +658,7 @@ class GameApp:
         audio.play_music(key, self.sounds, SOUNDS_DIR)
 
     def _rescale_background(self, width: Optional[int] = None, height: Optional[int] = None) -> None:
-        if self._background_original is None:
+        if not PIL_AVAILABLE or self._background_original is None:
             return
         width = width if width is not None else max(0, self.root.winfo_width())
         height = height if height is not None else max(0, self.root.winfo_height())
