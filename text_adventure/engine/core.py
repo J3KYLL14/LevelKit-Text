@@ -22,6 +22,204 @@ IMAGES_DIR = PACKAGE_ROOT / "assets" / "images"
 SOUNDS_DIR = PACKAGE_ROOT / "assets" / "sounds"
 
 
+class RoundedPanel(tk.Frame):
+    """Canvas-backed frame with rounded corners."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        corner_radius: int = 24,
+        background: str = "#181818",
+        padding: int = 20,
+    ) -> None:
+        super().__init__(master, bg="", highlightthickness=0, bd=0)
+        self._corner_radius = corner_radius
+        self._panel_color = background
+        self._padding = padding
+
+        self._canvas = tk.Canvas(self, bg="", highlightthickness=0, bd=0)
+        self._canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.inner = tk.Frame(self._canvas, bg=self._panel_color, highlightthickness=0, bd=0)
+        self._window_id = self._canvas.create_window(
+            (self._padding, self._padding),
+            window=self.inner,
+            anchor="nw",
+        )
+
+        self._canvas.bind("<Configure>", self._redraw)
+
+    def _redraw(self, event) -> None:
+        width = max(2, event.width)
+        height = max(2, event.height)
+        radius = min(self._corner_radius, width // 2, height // 2)
+        self._canvas.delete("panel")
+        points = self._rounded_points(0, 0, width, height, radius)
+        self._canvas.create_polygon(points, fill=self._panel_color, outline="", smooth=True, tags="panel")
+        inner_width = max(0, width - 2 * self._padding)
+        inner_height = max(0, height - 2 * self._padding)
+        self._canvas.coords(self._window_id, self._padding, self._padding)
+        self._canvas.itemconfigure(self._window_id, width=inner_width, height=inner_height)
+
+    @staticmethod
+    def _rounded_points(x1: int, y1: int, x2: int, y2: int, radius: int) -> List[int]:
+        if radius <= 0:
+            return [x1, y1, x2, y1, x2, y2, x1, y2]
+        return [
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2,
+            y2,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            x1,
+            y1,
+        ]
+
+
+class RoundedButton(tk.Canvas):
+    """Canvas-based button with rounded corners and left-aligned text."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        text: str = "",
+        command: Optional[Callable[[], None]] = None,
+        corner_radius: int = 18,
+        font: Tuple[str, int, str] = ("Segoe UI", 12, ""),
+        foreground: str = "#f0f0f0",
+        background: str = "#2b2b2b",
+        hover_background: str = "#3a3a3a",
+        active_background: str = "#4a4a4a",
+        disabled_background: str = "#1e1e1e",
+        padding: int = 18,
+        height: int = 54,
+    ) -> None:
+        super().__init__(master, highlightthickness=0, bd=0, bg="", height=height)
+        self._corner_radius = corner_radius
+        self._font = font
+        self._fg_color = foreground
+        self._bg_normal = background
+        self._bg_hover = hover_background
+        self._bg_active = active_background
+        self._bg_disabled = disabled_background
+        self._padding = padding
+        self._height = height
+        self._command = command
+        self._enabled = True
+        self._state = "normal"
+
+        self._text_id = self.create_text(
+            self._padding,
+            self._height // 2,
+            anchor="w",
+            text=text,
+            font=self._font,
+            fill=self._fg_color,
+            tags="text",
+            justify="left",
+            width=1,
+        )
+
+        self.bind("<Configure>", self._redraw)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
+
+    def set_text(self, text: str) -> None:
+        self.itemconfigure(self._text_id, text=text)
+        self._update_text_width()
+
+    def set_command(self, command: Callable[[], None]) -> None:
+        self._command = command
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+        self._state = "disabled" if not enabled else "normal"
+        self._apply_state_colors()
+
+    def _on_enter(self, _event) -> None:
+        if not self._enabled:
+            return
+        self._state = "hover"
+        self._apply_state_colors()
+
+    def _on_leave(self, _event) -> None:
+        if not self._enabled:
+            return
+        self._state = "normal"
+        self._apply_state_colors()
+
+    def _on_press(self, _event) -> None:
+        if not self._enabled:
+            return
+        self._state = "active"
+        self._apply_state_colors()
+
+    def _on_release(self, event) -> None:
+        if not self._enabled:
+            return
+        inside = 0 <= event.x <= self.winfo_width() and 0 <= event.y <= self.winfo_height()
+        self._state = "hover" if inside else "normal"
+        self._apply_state_colors()
+        if inside and self._command:
+            self._command()
+
+    def _apply_state_colors(self) -> None:
+        if self._state == "disabled":
+            color = self._bg_disabled
+            text_color = "#7a7a7a"
+        elif self._state == "active":
+            color = self._bg_active
+            text_color = self._fg_color
+        elif self._state == "hover":
+            color = self._bg_hover
+            text_color = self._fg_color
+        else:
+            color = self._bg_normal
+            text_color = self._fg_color
+        self._draw_background(color)
+        self.itemconfigure(self._text_id, fill=text_color)
+
+    def _redraw(self, _event) -> None:
+        self._update_text_width()
+        self._apply_state_colors()
+
+    def _update_text_width(self) -> None:
+        width = max(0, self.winfo_width() - 2 * self._padding)
+        self.itemconfigure(self._text_id, width=width)
+        self.coords(self._text_id, self._padding, self.winfo_height() / 2)
+
+    def _draw_background(self, fill_color: str) -> None:
+        width = max(2, self.winfo_width())
+        height = max(2, self.winfo_height())
+        radius = min(self._corner_radius, width // 2, height // 2)
+        self.delete("background")
+        points = RoundedPanel._rounded_points(0, 0, width, height, radius)
+        self.create_polygon(points, fill=fill_color, outline="", smooth=True, tags="background")
+        self.tag_lower("background")
+        self.tag_raise(self._text_id)
+
+
 class GameApp:
     """Top-level Tkinter application managing rooms and battles."""
 
@@ -56,15 +254,15 @@ class GameApp:
         self.background_label = tk.Label(self.root, bg="#000000", fg="#ffffff")
         self.background_label.place(relx=0, rely=0, relwidth=1, relheight=1)
 
-        self.top_frame = tk.Frame(self.root, bg="#1b1b1b", bd=0, highlightthickness=0)
-        self.top_frame.pack(side=tk.TOP, fill=tk.X)
+        self.top_frame = tk.Frame(self.root, bg="#121212", bd=0, highlightthickness=0)
+        self.top_frame.pack(side=tk.TOP, fill=tk.X, padx=24, pady=16)
 
         self.title_var = tk.StringVar(value="")
         self.title_label = tk.Label(
             self.top_frame,
             textvariable=self.title_var,
             anchor="w",
-            bg="#1b1b1b",
+            bg="#121212",
             fg="#f0f0f0",
             font=("Segoe UI", 20, "bold"),
             padx=16,
@@ -77,7 +275,7 @@ class GameApp:
             self.top_frame,
             textvariable=self.stats_var,
             anchor="e",
-            bg="#1b1b1b",
+            bg="#121212",
             fg="#dddddd",
             font=("Segoe UI", 14),
             padx=16,
@@ -85,42 +283,54 @@ class GameApp:
         )
         self.stats_label.pack(side=tk.RIGHT)
 
-        self.dialogue_frame = tk.Frame(self.root, bg="#141414")
-        self.dialogue_frame.pack(side=tk.BOTTOM, fill=tk.X)
-
         self.dialogue_var = tk.StringVar(value="")
+
+        self.content_frame = tk.Frame(self.root, bg="", highlightthickness=0, bd=0)
+        self.content_frame.place(relx=0.5, rely=0.65, anchor="center", relwidth=0.6)
+
+        self.dialogue_panel = RoundedPanel(
+            self.content_frame,
+            corner_radius=28,
+            background="#181818",
+            padding=28,
+        )
+        self.dialogue_panel.pack(side=tk.TOP, fill=tk.X)
+
         self.dialogue_label = tk.Label(
-            self.dialogue_frame,
+            self.dialogue_panel.inner,
             textvariable=self.dialogue_var,
-            justify="left",
-            anchor="nw",
-            wraplength=self.defaults.WINDOW_WIDTH - 40,
-            bg="#141414",
+            justify="center",
+            anchor="center",
+            wraplength=1,
+            bg="#181818",
             fg="#f8f8f2",
             font=("Segoe UI", 14),
-            padx=20,
-            pady=16,
         )
-        self.dialogue_label.pack(side=tk.TOP, fill=tk.X)
+        self.dialogue_label.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.dialogue_panel.inner.bind(
+            "<Configure>", lambda event: self._update_dialogue_wrap(event.width)
+        )
 
-        self.options_frame = tk.Frame(self.dialogue_frame, bg="#111111", pady=12)
-        self.options_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.options_container = tk.Frame(self.content_frame, bg="", highlightthickness=0, bd=0)
+        self.options_container.pack(side=tk.TOP, fill=tk.X, pady=18)
 
-        self.option_buttons: List[tk.Button] = []
+        self.option_buttons: List[RoundedButton] = []
         for index in range(9):
-            btn = tk.Button(
-                self.options_frame,
+            btn = RoundedButton(
+                self.options_container,
                 text="",
-                anchor="w",
-                justify="left",
-                bg="#2b2b2b",
-                fg="#f0f0f0",
-                activebackground="#3b3b3b",
-                activeforeground="#ffffff",
-                font=("Segoe UI", 12),
                 command=lambda idx=index: self._on_option(idx),
+                corner_radius=18,
+                font=("Segoe UI", 12, ""),
+                background="#252525",
+                hover_background="#343434",
+                active_background="#454545",
+                disabled_background="#151515",
+                padding=22,
+                height=56,
             )
-            btn.pack(side=tk.TOP, fill=tk.X, padx=20, pady=3)
+            btn.pack(side=tk.TOP, fill=tk.X, pady=6)
+            btn.set_enabled(False)
             self.option_buttons.append(btn)
 
         for number in range(1, 10):
@@ -166,6 +376,10 @@ class GameApp:
     def run(self) -> None:
         self.root.mainloop()
 
+    def _update_dialogue_wrap(self, width: int) -> None:
+        wraplength = max(0, width - 40)
+        self.dialogue_label.configure(wraplength=wraplength)
+
     def set_dialogue(self, text: str) -> None:
         self.dialogue_var.set(text)
 
@@ -174,9 +388,11 @@ class GameApp:
         for index, button in enumerate(self.option_buttons):
             if index < len(options):
                 label, _ = options[index]
-                button.configure(text=f"{index + 1}. {label}", state=tk.NORMAL)
+                button.set_text(f"{index + 1}. {label}")
+                button.set_enabled(True)
             else:
-                button.configure(text="", state=tk.DISABLED)
+                button.set_text("")
+                button.set_enabled(False)
 
     def _on_option(self, index: int) -> None:
         if index >= len(self.option_handlers):
