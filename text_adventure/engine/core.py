@@ -314,11 +314,35 @@ class GameApp:
         self.options_container = tk.Frame(self.content_frame, bg="", highlightthickness=0, bd=0)
         self.options_container.pack(side=tk.TOP, fill=tk.X, pady=18)
 
+        self.button_enabled_colors = {
+            "bg": "#2b2b2b",
+            "fg": "#f5f5f5",
+            "active_bg": "#3b3b3b",
+            "active_fg": "#ffffff",
+            "highlight": "#2b2b2b",
+        }
+        self.button_disabled_colors = {
+            "bg": "#1f1f1f",
+            "fg": "#a5a5a5",
+            "active_bg": "#1f1f1f",
+            "active_fg": "#a5a5a5",
+            "highlight": "#1f1f1f",
+        }
+
         self.option_buttons: List[RoundedButton] = []
+
         for index in range(9):
             btn = RoundedButton(
                 self.options_container,
                 text="",
+                anchor="w",
+                justify="left",
+                bg=self.button_enabled_colors["bg"],
+                fg=self.button_enabled_colors["fg"],
+                activebackground=self.button_enabled_colors["active_bg"],
+                activeforeground=self.button_enabled_colors["active_fg"],
+                font=("Segoe UI", 12),
+
                 command=lambda idx=index: self._on_option(idx),
                 corner_radius=18,
                 font=("Segoe UI", 12, ""),
@@ -329,8 +353,13 @@ class GameApp:
                 padding=22,
                 height=56,
             )
-            btn.pack(side=tk.TOP, fill=tk.X, pady=6)
-            btn.set_enabled(False)
+            btn.pack(side=tk.TOP, fill=tk.X, padx=20, pady=3)
+            btn.configure(
+                highlightthickness=0,
+                bd=0,
+                disabledforeground=self.button_disabled_colors["fg"],
+            )
+            self._style_option_button(btn, enabled=False)
             self.option_buttons.append(btn)
 
         for number in range(1, 10):
@@ -388,11 +417,35 @@ class GameApp:
         for index, button in enumerate(self.option_buttons):
             if index < len(options):
                 label, _ = options[index]
-                button.set_text(f"{index + 1}. {label}")
-                button.set_enabled(True)
+                self._style_option_button(
+                    button,
+                    enabled=True,
+                    text=f"{index + 1}. {label}",
+                )
             else:
-                button.set_text("")
-                button.set_enabled(False)
+                self._style_option_button(button, enabled=False, text="")
+
+    def _style_option_button(
+        self,
+        button: tk.Button,
+        *,
+        enabled: bool,
+        text: Optional[str] = None,
+    ) -> None:
+        colors = self.button_enabled_colors if enabled else self.button_disabled_colors
+        config: Dict[str, object] = {
+            "text": text if text is not None else button.cget("text"),
+            "state": tk.NORMAL if enabled else tk.DISABLED,
+            "bg": colors["bg"],
+            "fg": colors["fg"],
+            "activebackground": colors["active_bg"],
+            "activeforeground": colors["active_fg"],
+            "highlightbackground": colors["highlight"],
+            "highlightcolor": colors["fg"],
+        }
+        if not enabled:
+            config["disabledforeground"] = colors["fg"]
+        button.configure(**config)
 
     def _on_option(self, index: int) -> None:
         if index >= len(self.option_handlers):
