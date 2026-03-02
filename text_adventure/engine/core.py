@@ -146,7 +146,11 @@ class RoundedButton(tk.Canvas):
         padding: int = 18,
         height: int = 54,
     ) -> None:
-        super().__init__(master, highlightthickness=0, bd=0, bg="", height=height)
+        try:
+            _canvas_bg = master.cget("bg") or background
+        except tk.TclError:
+            _canvas_bg = background
+        super().__init__(master, highlightthickness=0, bd=0, bg=_canvas_bg, height=height)
         self._corner_radius = corner_radius
         self._font = font
         self._fg_color = foreground
