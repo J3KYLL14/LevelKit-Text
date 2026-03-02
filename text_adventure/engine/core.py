@@ -1,22 +1,13 @@
 """Tkinter-powered classroom adventure engine."""
 
-import importlib
-from importlib import util as importlib_util
 import random
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 from typing import Callable, Dict, List, Optional, Tuple
 
-Image = None
-ImageTk = None
-PIL_AVAILABLE = False
-
-_pil_spec = importlib_util.find_spec("PIL")
-if _pil_spec is not None:
-    Image = importlib.import_module("PIL.Image")
-    ImageTk = importlib.import_module("PIL.ImageTk")
-    PIL_AVAILABLE = True
+# Background images are handled by tkinter's built-in PhotoImage (PNG and GIF only).
+# No third-party libraries are required.
 
 from . import audio, save
 from .models import BattleAction, BattleSpec, RoomSpec, Stats
@@ -339,7 +330,6 @@ class GameApp:
         fallback_text = self._theme("window", "fallback_text", default="#ffffff") or "#ffffff"
         self._fallback_text_color = fallback_text
         self._fallback_font = ("Segoe UI", 24, "bold")
-        self._background_original: Optional[object] = None
         self._background_photo: Optional[object] = None
         self._last_size: Tuple[int, int] = (0, 0)
 
@@ -611,7 +601,6 @@ class GameApp:
         )
 
     def _set_background(self, key: Optional[str]) -> None:
-        self._background_original = None
         self._background_photo = None
         message_kwargs = {
             "image": "",
@@ -620,14 +609,7 @@ class GameApp:
             "font": self._fallback_font,
         }
         if not key:
-            self.background_label.configure(text="No background image", **message_kwargs)
-            self.background_label.image = None
-            return
-        if not PIL_AVAILABLE:
-            self.background_label.configure(
-                text="Install Pillow to enable backgrounds.",
-                **message_kwargs,
-            )
+            self.background_label.configure(text="", **message_kwargs)
             self.background_label.image = None
             return
         filename = self.images.get(key)
@@ -640,16 +622,21 @@ class GameApp:
             self.background_label.configure(text="Background file not found", **message_kwargs)
             self.background_label.image = None
             return
+        if path.suffix.lower() not in (".png", ".gif"):
+            self.background_label.configure(
+                text=f"Background must be a PNG or GIF (got {path.suffix}).",
+                **message_kwargs,
+            )
+            self.background_label.image = None
+            return
         try:
-            with Image.open(path) as source:
-                self._background_original = source.convert("RGBA")
-        except Exception:
+            photo = tk.PhotoImage(file=str(path))
+            self._background_photo = photo
+            self.background_label.configure(image=photo, text="")
+            self.background_label.image = photo
+        except tk.TclError:
             self.background_label.configure(text="Failed to load image", **message_kwargs)
             self.background_label.image = None
-            self._background_original = None
-            return
-        self.background_label.configure(text="")
-        self._rescale_background()
 
     def _set_music(self, key: Optional[str]) -> None:
         if key == self.current_music_key:
@@ -658,16 +645,9 @@ class GameApp:
         audio.play_music(key, self.sounds, SOUNDS_DIR)
 
     def _rescale_background(self, width: Optional[int] = None, height: Optional[int] = None) -> None:
-        if not PIL_AVAILABLE or self._background_original is None:
-            return
-        width = width if width is not None else max(0, self.root.winfo_width())
-        height = height if height is not None else max(0, self.root.winfo_height())
-        if width <= 0 or height <= 0:
-            return
-        resized = self._background_original.resize((width, height), Image.LANCZOS)
-        self._background_photo = ImageTk.PhotoImage(resized)
-        self.background_label.configure(image=self._background_photo, text="")
-        self.background_label.image = self._background_photo
+        # Images are displayed at their native resolution.
+        # Save backgrounds at 1280×720 (WINDOW_WIDTH × WINDOW_HEIGHT) for best results.
+        pass
 
     def _on_root_configure(self, _event) -> None:
         width = max(0, self.root.winfo_width())
