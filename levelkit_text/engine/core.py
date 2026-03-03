@@ -333,16 +333,20 @@ class GameApp:
             self._stat_labels[key] = label
 
         # --- Bottom content area ---
-        bottom_frame = tk.Frame(self._content_frame, bg="")
-        bottom_frame.pack(side="top", fill="both", expand=True, padx=20, pady=(10, 40))
+        # Store as instance vars so _set_background can repaint them when the
+        # room changes.  bg="" is not transparent on macOS Aqua; use window_bg.
+        self._bottom_frame = tk.Frame(self._content_frame, bg=window_bg)
+        self._bottom_frame.pack(side="top", fill="both", expand=True, padx=20, pady=(10, 40))
+        bottom_frame = self._bottom_frame
 
         # Main column (dialogue + options)
-        main_column = tk.Frame(bottom_frame, bg="")
-        main_column.pack(side="left", fill="both", expand=True)
+        self._main_column = tk.Frame(bottom_frame, bg=window_bg)
+        self._main_column.pack(side="left", fill="both", expand=True)
+        main_column = self._main_column
 
         # Spacer to push dialogue/options to bottom
-        spacer = tk.Frame(main_column, bg="")
-        spacer.pack(side="top", fill="both", expand=True)
+        self._spacer_frame = tk.Frame(main_column, bg=window_bg)
+        self._spacer_frame.pack(side="top", fill="both", expand=True)
 
         # Options panel (packed to bottom first so dialogue sits above)
         options_bg = _tk_color(self._theme("options", "panel_background", default="#1c1c1ccc"), "#1c1c1c")
@@ -536,46 +540,51 @@ class GameApp:
     # ------------------------------------------------------------------
     # Background handling
     # ------------------------------------------------------------------
+    def _apply_room_bg(self, color: str) -> None:
+        """Paint every layout frame that has no opaque child background."""
+        self._canvas.configure(bg=color)
+        for frame in (
+            self._content_frame,
+            self._bottom_frame,
+            self._main_column,
+            self._spacer_frame,
+        ):
+            frame.configure(bg=color)
+
     def _set_background(self, key: Optional[str]) -> None:
         self._bg_photo = None
 
         if not key:
-            self._canvas.configure(bg=self._window_bg)
-            self._content_frame.configure(bg=self._window_bg)
+            self._apply_room_bg(self._window_bg)
             self._canvas.itemconfig(self._bg_image_id, image="")
             return
         filename = self.images.get(key)
         if not filename:
-            self._canvas.configure(bg=self._window_bg)
-            self._content_frame.configure(bg=self._window_bg)
+            self._apply_room_bg(self._window_bg)
             self._canvas.itemconfig(self._bg_image_id, image="")
             return
         path = IMAGES_DIR / filename
         if not path.exists():
-            self._canvas.configure(bg=self._window_bg)
-            self._content_frame.configure(bg=self._window_bg)
+            self._apply_room_bg(self._window_bg)
             self._canvas.itemconfig(self._bg_image_id, image="")
             return
         try:
             photo = tk.PhotoImage(file=str(path))
         except tk.TclError:
-            self._canvas.configure(bg=self._window_bg)
-            self._content_frame.configure(bg=self._window_bg)
+            self._apply_room_bg(self._window_bg)
             self._canvas.itemconfig(self._bg_image_id, image="")
             return
 
-        # Extract the dominant colour from pixel (0,0) of the image so
-        # the canvas background and content-frame margins always match the
-        # room backdrop — this ensures room colours are visible on macOS
-        # where tk.Frame does not support true transparency.
+        # Extract the dominant colour from pixel (0,0) of the image so every
+        # layout frame matches the room backdrop on macOS where tk.Frame has
+        # no true transparency.
         try:
             pix = photo.get(0, 0)
             room_bg = f"#{int(pix[0]):02x}{int(pix[1]):02x}{int(pix[2]):02x}"
         except Exception:
             room_bg = self._window_bg
 
-        self._canvas.configure(bg=room_bg)
-        self._content_frame.configure(bg=room_bg)
+        self._apply_room_bg(room_bg)
         self._bg_photo = photo
         self._canvas.itemconfig(self._bg_image_id, image=self._bg_photo)
         self._center_background()
