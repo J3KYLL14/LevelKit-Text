@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter
 import random
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import tkinter as tk
 from tkinter import messagebox
@@ -538,6 +540,27 @@ class GameApp:
         """Set the canvas background colour for edges not covered by the image."""
         self._canvas.configure(bg=color)
 
+    # Extensions tk.PhotoImage handles natively.
+    _TK_NATIVE = {".png", ".gif", ".pgm", ".ppm"}
+    # Extra formats we support by converting to PNG via macOS sips.
+    _CONVERTIBLE = {".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".heic"}
+    _SUPPORTED_EXTS = _TK_NATIVE | _CONVERTIBLE
+
+    @staticmethod
+    def _convert_to_png(src: Path) -> Optional[Path]:
+        """Use macOS *sips* to convert an image to a temporary PNG file."""
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            tmp.close()
+            subprocess.run(
+                ["sips", "-s", "format", "png", str(src), "--out", tmp.name],
+                capture_output=True,
+                check=True,
+            )
+            return Path(tmp.name)
+        except Exception:
+            return None
+
     def _set_background(self, key: Optional[str]) -> None:
         self._bg_photo = None
 
@@ -555,12 +578,33 @@ class GameApp:
             self._apply_room_bg(self._window_bg)
             self._canvas.itemconfig(self._bg_image_id, image="")
             return
+
+        ext = path.suffix.lower()
+        if ext not in self._SUPPORTED_EXTS:
+            self._apply_room_bg(self._window_bg)
+            self._canvas.itemconfig(self._bg_image_id, image="")
+            return
+
+        # Convert non-native formats to a temporary PNG via sips.
+        tmp_path: Optional[Path] = None
+        load_path = path
+        if ext not in self._TK_NATIVE:
+            tmp_path = self._convert_to_png(path)
+            if tmp_path is None:
+                self._apply_room_bg(self._window_bg)
+                self._canvas.itemconfig(self._bg_image_id, image="")
+                return
+            load_path = tmp_path
+
         try:
-            photo = tk.PhotoImage(file=str(path))
+            photo = tk.PhotoImage(file=str(load_path))
         except tk.TclError:
             self._apply_room_bg(self._window_bg)
             self._canvas.itemconfig(self._bg_image_id, image="")
             return
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
 
         # Extract the dominant colour from pixel (0,0) of the image so every
         # layout frame matches the room backdrop on macOS where tk.Frame has
