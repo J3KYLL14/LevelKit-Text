@@ -262,19 +262,13 @@ class GameApp:
         self._canvas.pack(fill="both", expand=True)
         self._bg_image_id = self._canvas.create_image(0, 0, anchor="center")
 
-        # Content frame overlaid on the canvas.
-        # bg must be an explicit colour (not "") so macOS Aqua does not
-        # substitute the system window colour and hide the room backdrop.
-        self._content_frame = tk.Frame(self._canvas, bg=window_bg)
-        self._content_window = self._canvas.create_window(
-            0, 0, anchor="nw", window=self._content_frame
-        )
-
         # --- Header ---
+        # Placed directly on the canvas so the background image shows through
+        # the gap between header and bottom HUD panel.
         header_bg = _tk_color(self._theme("header", "panel_background", default="#202020cc"), "#202020")
         header_padding = self._int(self._theme("header", "padding", default=16), 16) + 8
-        header_frame = tk.Frame(self._content_frame, bg=header_bg, padx=header_padding, pady=header_padding)
-        header_frame.pack(side="top", fill="x", padx=20, pady=(20, 0))
+        header_frame = tk.Frame(self._canvas, bg=header_bg, padx=header_padding, pady=header_padding)
+        self._header_window = self._canvas.create_window(20, 20, anchor="nw", window=header_frame)
 
         # Title column
         title_frame = tk.Frame(header_frame, bg=header_bg)
@@ -332,21 +326,17 @@ class GameApp:
             label.grid(row=row, column=col, padx=12, pady=2, sticky="e")
             self._stat_labels[key] = label
 
-        # --- Bottom content area ---
-        # Store as instance vars so _set_background can repaint them when the
-        # room changes.  bg="" is not transparent on macOS Aqua; use window_bg.
-        self._bottom_frame = tk.Frame(self._content_frame, bg=window_bg)
-        self._bottom_frame.pack(side="top", fill="both", expand=True, padx=20, pady=(10, 40))
+        # --- Bottom HUD panel (dialogue + options + inventory) ---
+        # Anchored to the canvas bottom so the background image shows in the
+        # space between header and this panel.
+        self._bottom_frame = tk.Frame(self._canvas, bg=window_bg)
+        self._bottom_window = self._canvas.create_window(20, 0, anchor="sw", window=self._bottom_frame)
         bottom_frame = self._bottom_frame
 
         # Main column (dialogue + options)
         self._main_column = tk.Frame(bottom_frame, bg=window_bg)
         self._main_column.pack(side="left", fill="both", expand=True)
         main_column = self._main_column
-
-        # Spacer to push dialogue/options to bottom
-        self._spacer_frame = tk.Frame(main_column, bg=window_bg)
-        self._spacer_frame.pack(side="top", fill="both", expand=True)
 
         # Options panel (packed to bottom first so dialogue sits above)
         options_bg = _tk_color(self._theme("options", "panel_background", default="#1c1c1ccc"), "#1c1c1c")
@@ -404,13 +394,17 @@ class GameApp:
         list_font = _tk_font(self._theme("inventory", "list_font", default=("Segoe UI", 12, "")))
         button_hover_color = _tk_color(self._theme("options", "button_hover_background", default="#343434"), "#343434")
 
+        # Inventory is a separate canvas window on the right side so it stretches
+        # the full height and the background image shows behind both HUD panels.
         self._inventory_frame = tk.Frame(
-            bottom_frame, bg=inventory_bg, padx=inventory_padding, pady=inventory_padding,
+            self._canvas, bg=inventory_bg, padx=inventory_padding, pady=inventory_padding,
         )
-        self._inventory_frame.pack(side="right", fill="y", padx=(20, 0))
         self._inventory_frame.pack_propagate(False)
         inv_width = max(180, int(self.defaults.WINDOW_WIDTH * 0.14))
         self._inventory_frame.config(width=inv_width)
+        self._inventory_window = self._canvas.create_window(
+            0, 20, anchor="ne", window=self._inventory_frame
+        )
 
         # Inventory title
         self.inventory_title = tk.Label(
@@ -541,15 +535,8 @@ class GameApp:
     # Background handling
     # ------------------------------------------------------------------
     def _apply_room_bg(self, color: str) -> None:
-        """Paint every layout frame that has no opaque child background."""
+        """Set the canvas background colour for edges not covered by the image."""
         self._canvas.configure(bg=color)
-        for frame in (
-            self._content_frame,
-            self._bottom_frame,
-            self._main_column,
-            self._spacer_frame,
-        ):
-            frame.configure(bg=color)
 
     def _set_background(self, key: Optional[str]) -> None:
         self._bg_photo = None
@@ -596,15 +583,26 @@ class GameApp:
             self._canvas.coords(self._bg_image_id, w // 2, h // 2)
 
     def _on_resize(self, event: Any) -> None:
-        self._canvas.itemconfig(self._content_window, width=event.width, height=event.height)
-        self._center_background()
-        # Update dialogue wraplength based on available width
-        main_width = max(200, int(event.width * 0.6))
-        self.dialogue_label.config(wraplength=main_width)
-        # Update inventory width
         inv_width = max(180, int(event.width * 0.14))
+
+        # Inventory: right-side panel, full available height
+        inv_h = max(100, event.height - 40)
+        self._canvas.itemconfig(self._inventory_window, width=inv_width, height=inv_h)
+        self._canvas.coords(self._inventory_window, event.width - 20, 20)
         self._inventory_frame.config(width=inv_width)
-        # Update inventory detail wraplength
+
+        # Header and bottom panel sit to the left of the inventory
+        content_width = max(200, event.width - inv_width - 60)
+        self._canvas.itemconfig(self._header_window, width=content_width)
+        self._canvas.itemconfig(self._bottom_window, width=content_width)
+        self._canvas.coords(self._bottom_window, 20, event.height - 20)
+
+        self._center_background()
+
+        # Dialogue wraplength based on content column width
+        self.dialogue_label.config(wraplength=max(200, int(content_width * 0.9)))
+
+        # Inventory detail wraplength
         detail_wrap = max(100, inv_width - 30)
         self.inventory_detail_label.config(wraplength=detail_wrap)
         self.inventory_hint_label.config(wraplength=detail_wrap)

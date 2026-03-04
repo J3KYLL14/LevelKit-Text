@@ -7,5 +7,6 @@ IMAGES: dict[str, str] = {
     "goblin_yellow": "bg_yellow.png",
     "victory_green": "bg_green.png",
     "defeat_red": "bg_red.png",
+    "castle_start": "Castle.png",
 }
 
