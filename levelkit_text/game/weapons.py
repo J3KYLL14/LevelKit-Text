@@ -15,7 +15,7 @@ WEAPON_DEFINITIONS: dict[str, dict[str, object]] = {
         "description": "A simple bow made from sturdy oak, suitable for beginners.",
         "category": "weapon",
         "weapon_type": "ranged",
+        "min_level": 2,
         "effects": {"attack": 8, "range": 15},
     },
 }
-

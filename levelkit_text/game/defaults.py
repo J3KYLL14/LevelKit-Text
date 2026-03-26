@@ -50,3 +50,9 @@ CRIT_MULTIPLIER = 1.5
 XP_PER_VICTORY = 5
 MANA_PER_ROOM = 0.25
 
+# Stat gains applied each time the player levels up. Students can edit these.
+LEVEL_UP_BONUSES = {
+    "attack": 1,
+    "defence": 2,
+    "max_hp": 1,
+}

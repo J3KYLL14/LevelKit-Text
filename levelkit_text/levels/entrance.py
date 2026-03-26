@@ -1,6 +1,6 @@
 """Starting room for the template adventure."""
 
-from engine.models import OptionSpec, RoomSpec
+from engine.models import Button, RoomSpec
 
 ROOM = RoomSpec(
     id="start",
@@ -11,8 +11,7 @@ ROOM = RoomSpec(
     ),
     background_key="castle_start",
     options=[
-        OptionSpec(label="Go left toward the practice alcove", to="armory"),
-        OptionSpec(label="Go right toward the flickering light", to="goblin_hall"),
+        Button(label="Go left toward the practice alcove", to="armory"),
+        Button(label="Go right toward the flickering light", to="goblin_hall"),
     ],
 )
-

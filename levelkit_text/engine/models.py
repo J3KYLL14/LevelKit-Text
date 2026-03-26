@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 
 @dataclass
@@ -25,6 +25,9 @@ class Item:
     weapon_type: Optional[Literal["melee", "ranged"]] = None
     ammo_item: Optional[str] = None
     ammo_per_use: int = 1
+    equip_slot: Optional[Literal["melee", "ranged", "armour"]] = None
+    min_level: int = 1
+    uses: Optional[int] = None
 
 
 @dataclass
@@ -50,7 +53,7 @@ class Enemy:
 
 
 @dataclass
-class OptionSpec:
+class Button:
     label: str
     to: Optional[str] = None
     battle_id: Optional[str] = None
@@ -70,6 +73,9 @@ class OptionSpec:
     sound_key: Optional[str] = None
 
 
+OptionSpec = Button
+
+
 @dataclass
 class RoomSpec:
     id: str
@@ -79,7 +85,7 @@ class RoomSpec:
     music_key: Optional[str] = None
     enter_sound_key: Optional[str] = None
     puzzle: Optional[Dict[str, Any]] = None
-    options: List[OptionSpec] = field(default_factory=list)
+    options: List[Button] = field(default_factory=list)
 
 
 @dataclass

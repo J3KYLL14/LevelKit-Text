@@ -1,6 +1,6 @@
 """Room visited when the player loses to the goblin."""
 
-from engine.models import OptionSpec, RoomSpec
+from engine.models import Button, RoomSpec
 
 ROOM = RoomSpec(
     id="goblin_defeat",
@@ -11,7 +11,6 @@ ROOM = RoomSpec(
     ),
     background_key="defeat_red",
     options=[
-        OptionSpec(label="Gather yourself and try again", to="start"),
+        Button(label="Gather yourself and try again", to="start"),
     ],
 )
-

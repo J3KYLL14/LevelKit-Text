@@ -226,6 +226,7 @@ class GameApp:
 
         self.stats = self._build_stats(self.defaults.STARTING_STATS)
         self.inventory: Dict[str, int] = {}
+        self.item_uses: Dict[str, List[int]] = {}
         self.flags: Dict[str, int] = {}
         self.timed_flags: Dict[str, int] = {}
         self.alert_level: int = 0
@@ -235,9 +236,10 @@ class GameApp:
         self.option_handlers: List[Callable[[], None]] = []
         self._pending_room_transition: Optional[str] = None
         self._unique_loot_awards: Set[str] = set()
-        self.equipment: Dict[str, Optional[str]] = {"melee": None, "ranged": None}
+        self.equipment: Dict[str, Optional[str]] = {"melee": None, "ranged": None, "armour": None}
         self.battle_repeat_tracker: Dict[str, int] = {}
         self._mana_regen_reserve: float = 0.0
+        self._current_level = self._calculate_level_progress()[0]
 
         self.theme: Dict[str, Any] = getattr(self.defaults, "UI_THEME", {})
 
@@ -429,7 +431,7 @@ class GameApp:
         self._equipped_container_visible = False
 
         self.inventory_equipped_sections: Dict[str, Dict[str, Any]] = {}
-        for slot in ("melee", "ranged", "magic"):
+        for slot in ("melee", "ranged", "armour"):
             section_widget = tk.Frame(self.inventory_equipped_container, bg=inventory_bg)
 
             slot_label = tk.Label(
@@ -717,6 +719,32 @@ class GameApp:
         progress = total_xp % xp_per_level
         return level, progress, xp_per_level
 
+    def _sync_level_progress(self) -> None:
+        new_level = self._player_level()
+        if new_level <= self._current_level:
+            return
+        level_bonus_map = getattr(self.defaults, "LEVEL_UP_BONUSES", {})
+        if not isinstance(level_bonus_map, dict):
+            level_bonus_map = {}
+        for _ in range(self._current_level, new_level):
+            for stat_name, delta in level_bonus_map.items():
+                if not isinstance(delta, (int, float)):
+                    continue
+                change = int(delta)
+                self._apply_stat_delta(str(stat_name), change)
+                if stat_name == "max_hp" and change > 0:
+                    self._apply_stat_delta("hp", change)
+                if stat_name == "max_mana" and change > 0:
+                    self._apply_stat_delta("mana", change)
+        self._current_level = new_level
+        gains = ", ".join(
+            f"+{int(delta)} {str(stat_name).replace('_', ' ').upper()}"
+            for stat_name, delta in level_bonus_map.items()
+            if isinstance(delta, (int, float)) and int(delta) != 0
+        )
+        if gains:
+            self._append_dialogue(f"Level up. Your new stat gains: {gains}.")
+
     # ------------------------------------------------------------------
     # Inventory
     # ------------------------------------------------------------------
@@ -741,6 +769,12 @@ class GameApp:
         if slot:
             extra_lines.append(f"Currently equipped in {slot} slot.")
         category = definition.get("category", "")
+        if self._is_equippable(definition):
+            equip_slot = self._equipment_slot(definition)
+            extra_lines.append(f"Equipment slot: {equip_slot.capitalize()}")
+            min_level = max(1, int(definition.get("min_level", 1)))
+            if min_level > 1:
+                extra_lines.append(f"Requires level {min_level}.")
         if category == "weapon" or definition.get("weapon_type"):
             weapon_type = self._weapon_slot(definition)
             extra_lines.append(f"Weapon type: {weapon_type.capitalize()}")
@@ -751,6 +785,9 @@ class GameApp:
                 extra_lines.append(f"Consumes {ammo_per_use} {ammo_name} per attack.")
         elif category == "ammo":
             extra_lines.append("Ammo is spent automatically by ranged weapons.")
+        uses_left = self._uses_display(item_id)
+        if uses_left:
+            extra_lines.append(uses_left)
         detail_text = description
         if extra_lines:
             detail_text = f"{description}\n" + "\n".join(extra_lines) if description else "\n".join(extra_lines)
@@ -807,7 +844,7 @@ class GameApp:
 
         if backpack_counts:
             for item_id, count in backpack_counts.items():
-                name = self._item_name(item_id)
+                name = self._inventory_label(item_id, count)
                 suffix = f" x{count}" if count > 1 else ""
                 self.inventory_backpack_list.add_item(f"{name}{suffix}", item_id)
         else:
@@ -847,7 +884,7 @@ class GameApp:
             selectbackground=_tk_color(self._theme("options", "button_hover_background", default="#343434"), "#343434"),
         )
         for item_id, count in self.inventory.items():
-            name = self._item_name(item_id)
+            name = self._inventory_label(item_id, count)
             suffix = f" x{count}" if count > 1 else ""
             slot = self._equipped_slot(item_id)
             equipped_tag = f" [Equipped: {slot.capitalize()}]" if slot else ""
@@ -870,7 +907,7 @@ class GameApp:
             return
         definition = self._item_definition(item_id)
         if self._use_item(item_id):
-            if definition.get("category") == "weapon" or definition.get("weapon_type"):
+            if self._is_equippable(definition):
                 self._refresh_inventory_panel()
                 return
             if self.inventory.get(item_id, 0) <= 0:
@@ -892,13 +929,100 @@ class GameApp:
         definition = self._item_definition(item_id)
         return str(definition.get("name", item_id))
 
+    def _is_equippable(self, definition: Dict[str, Any]) -> bool:
+        category = str(definition.get("category", "")).lower()
+        return bool(definition.get("weapon_type")) or category in {"weapon", "armour", "equipment"}
+
+    def _equipment_slot(self, definition: Dict[str, Any]) -> str:
+        explicit_slot = str(definition.get("equip_slot", "")).lower()
+        if explicit_slot in {"melee", "ranged", "armour"}:
+            return explicit_slot
+        category = str(definition.get("category", "")).lower()
+        if category == "armour":
+            return "armour"
+        return self._weapon_slot(definition)
+
+    def _inventory_label(self, item_id: str, count: int) -> str:
+        label = self._item_name(item_id)
+        if count == 1:
+            uses_display = self._uses_display(item_id)
+            if uses_display:
+                label = f"{label} ({uses_display})"
+        return label
+
+    def _uses_display(self, item_id: str) -> str:
+        uses = self.item_uses.get(item_id, [])
+        if not uses:
+            return ""
+        if len(uses) == 1:
+            remaining = max(0, uses[0])
+            label = "use" if remaining == 1 else "uses"
+            return f"{remaining} {label} left"
+        return ""
+
+    def _player_level(self) -> int:
+        return self._calculate_level_progress()[0]
+
+    def _meets_level_requirement(self, definition: Dict[str, Any]) -> Tuple[bool, int]:
+        required_level = max(1, int(definition.get("min_level", 1)))
+        return self._player_level() >= required_level, required_level
+
+    def _consume_item_use(self, item_id: str, amount: int = 1) -> bool:
+        if amount <= 0:
+            return True
+        if self.inventory.get(item_id, 0) <= 0:
+            return False
+        tracked_uses = self.item_uses.get(item_id)
+        if tracked_uses:
+            remaining = tracked_uses[0] - amount
+            if remaining > 0:
+                tracked_uses[0] = remaining
+            else:
+                tracked_uses.pop(0)
+                self._consume_inventory(item_id, 1)
+                if not tracked_uses:
+                    self.item_uses.pop(item_id, None)
+            self._refresh_inventory_panel()
+            return True
+        self._consume_inventory(item_id, amount)
+        return True
+
+    def _apply_stat_delta(self, stat_name: str, delta: int) -> None:
+        if not hasattr(self.stats, stat_name):
+            return
+        new_value = getattr(self.stats, stat_name) + int(delta)
+        if stat_name == "max_hp":
+            self.stats.max_hp = max(1, new_value)
+            self.stats.hp = min(self.stats.hp, self.stats.max_hp)
+            return
+        if stat_name == "max_mana":
+            self.stats.max_mana = max(0, new_value)
+            self.stats.mana = min(self.stats.mana, self.stats.max_mana)
+            return
+        if stat_name == "hp":
+            self.stats.hp = max(0, min(self.stats.max_hp, new_value))
+            return
+        if stat_name == "mana":
+            self.stats.mana = max(0, min(self.stats.max_mana, new_value))
+            return
+        setattr(self.stats, stat_name, new_value)
+
+    def _apply_effect_map(self, effects: Dict[str, Any], *, remove: bool = False) -> None:
+        for stat_name, delta in effects.items():
+            if not isinstance(delta, (int, float)):
+                continue
+            change = int(delta)
+            if remove:
+                change = -change
+            self._apply_stat_delta(str(stat_name), change)
+
     def _use_item(self, item_id: str) -> bool:
         if item_id not in self.inventory:
             return False
         definition = self._item_definition(item_id)
         category = definition.get("category", "")
-        if category == "weapon" or definition.get("weapon_type"):
-            equipped = self._equip_weapon(item_id, definition)
+        if self._is_equippable(definition):
+            equipped = self._equip_item(item_id, definition)
             if equipped and self.current_battle:
                 self._refresh_battle_actions(self.current_battle["spec"])
             return equipped
@@ -909,22 +1033,31 @@ class GameApp:
             )
             return False
         effects = definition.get("effects", {})
-        for stat_name, delta in effects.items():
-            if hasattr(self.stats, stat_name):
-                value = getattr(self.stats, stat_name) + int(delta)
-                if stat_name == "hp":
-                    value = min(self.stats.max_hp, max(0, value))
-                setattr(self.stats, stat_name, value)
+        if not effects and category != "consumable":
+            messagebox.showinfo(
+                "Inventory",
+                f"{self._item_name(item_id)} cannot be used from the inventory right now.",
+            )
+            return False
+        self._apply_effect_map(effects)
         if definition.get("category") == "consumable":
-            self.inventory[item_id] -= 1
-            if self.inventory[item_id] <= 0:
-                self.inventory.pop(item_id, None)
+            self._consume_item_use(item_id, 1)
+        if "xp" in effects:
+            self._sync_level_progress()
         self.update_stats_display()
         messagebox.showinfo("Inventory", f"Used {definition.get('name', item_id)}.")
         return True
 
-    def _equip_weapon(self, item_id: str, definition: Dict[str, Any], *, notify: bool = True) -> bool:
-        slot = self._weapon_slot(definition)
+    def _equip_item(self, item_id: str, definition: Dict[str, Any], *, notify: bool = True) -> bool:
+        meets_requirement, required_level = self._meets_level_requirement(definition)
+        if not meets_requirement:
+            if notify:
+                messagebox.showinfo(
+                    "Inventory",
+                    f"{self._item_name(item_id)} can be equipped from level {required_level}.",
+                )
+            return False
+        slot = self._equipment_slot(definition)
         current = self.equipment.get(slot)
         if current == item_id:
             if notify:
@@ -934,9 +1067,9 @@ class GameApp:
                 )
             return False
         if current:
-            self._unequip_weapon(slot)
+            self._unequip_item(slot)
         self.equipment[slot] = item_id
-        self._apply_weapon_effects(definition, remove=False)
+        self._apply_equipment_effects(definition, remove=False)
         self.update_stats_display()
         self._refresh_inventory_panel()
         if notify:
@@ -946,23 +1079,27 @@ class GameApp:
             )
         return True
 
-    def _unequip_weapon(self, slot: str) -> None:
-        weapon_id = self.equipment.get(slot)
-        if not weapon_id:
+    def _unequip_item(self, slot: str) -> None:
+        equipped_id = self.equipment.get(slot)
+        if not equipped_id:
             return
-        definition = self._item_definition(weapon_id)
-        self._apply_weapon_effects(definition, remove=True)
+        definition = self._item_definition(equipped_id)
+        self._apply_equipment_effects(definition, remove=True)
         self.equipment[slot] = None
         self._refresh_inventory_panel()
 
-    def _apply_weapon_effects(self, definition: Dict[str, Any], *, remove: bool) -> None:
+    def _apply_equipment_effects(self, definition: Dict[str, Any], *, remove: bool) -> None:
         effects = definition.get("effects", {})
-        for stat_name, delta in effects.items():
-            if hasattr(self.stats, stat_name):
-                change = int(delta)
-                if remove:
-                    change = -change
-                setattr(self.stats, stat_name, getattr(self.stats, stat_name) + change)
+        self._apply_effect_map(effects, remove=remove)
+        if not isinstance(effects, dict):
+            return
+        if not remove:
+            max_hp_bonus = effects.get("max_hp")
+            if isinstance(max_hp_bonus, (int, float)) and int(max_hp_bonus) > 0:
+                self._apply_stat_delta("hp", int(max_hp_bonus))
+            max_mana_bonus = effects.get("max_mana")
+            if isinstance(max_mana_bonus, (int, float)) and int(max_mana_bonus) > 0:
+                self._apply_stat_delta("mana", int(max_mana_bonus))
 
     def _weapon_slot(self, definition: Dict[str, Any]) -> str:
         weapon_type = str(definition.get("weapon_type", "melee")).lower()
@@ -981,9 +1118,27 @@ class GameApp:
         remaining = current - amount
         if remaining <= 0:
             self.inventory.pop(item_id, None)
+            self.item_uses.pop(item_id, None)
+            slot = self._equipped_slot(item_id)
+            if slot:
+                self._unequip_item(slot)
         else:
             self.inventory[item_id] = remaining
         self._refresh_inventory_panel()
+
+    def _grant_items(self, items: List[str]) -> List[str]:
+        counts = Counter(items)
+        display: List[str] = []
+        for item_id, count in counts.items():
+            self.inventory[item_id] = self.inventory.get(item_id, 0) + count
+            max_uses = self._item_definition(item_id).get("uses")
+            if isinstance(max_uses, (int, float)) and int(max_uses) > 0:
+                tracked = self.item_uses.setdefault(item_id, [])
+                tracked.extend([int(max_uses)] * count)
+            name = self._item_name(item_id)
+            suffix = f" x{count}" if count > 1 else ""
+            display.append(f"{name}{suffix}")
+        return display
 
     # ------------------------------------------------------------------
     # Room & battle handling
@@ -1059,6 +1214,18 @@ class GameApp:
     def _evaluate_requirement(self, expr: Dict[str, Any]) -> bool:
         if not isinstance(expr, dict):
             return False
+        if "level_at_least" in expr:
+            return self._player_level() >= int(expr["level_at_least"])
+        if "has_item" in expr:
+            return self.inventory.get(str(expr["has_item"]), 0) > 0
+        if "items" in expr:
+            requirements = expr.get("items", {})
+            if not isinstance(requirements, dict):
+                return False
+            for item_id, amount in requirements.items():
+                if self.inventory.get(str(item_id), 0) < int(amount):
+                    return False
+            return True
         if "flag" in expr:
             return self._flag_value(str(expr["flag"])) > 0
         if "not_flag" in expr:
@@ -1335,6 +1502,7 @@ class GameApp:
         battle: BattleSpec = self.current_battle["spec"]
         self.set_dialogue(battle.victory_text)
         self.stats.xp += getattr(self.defaults, "XP_PER_VICTORY", 0)
+        self._sync_level_progress()
         self._collect_loot(battle.enemy.loot)
         table_loot = self._roll_loot_table(battle.loot_table, battle.loot_rolls)
         if table_loot:
@@ -1361,13 +1529,7 @@ class GameApp:
     def _collect_loot(self, items: List[str]) -> None:
         if not items:
             return
-        counts = Counter(items)
-        display: List[str] = []
-        for item_id, count in counts.items():
-            self.inventory[item_id] = self.inventory.get(item_id, 0) + count
-            name = self._item_name(item_id)
-            suffix = f" x{count}" if count > 1 else ""
-            display.append(f"{name}{suffix}")
+        display = self._grant_items(items)
         loot_text = ", ".join(display)
         self._append_dialogue(f"Loot acquired: {loot_text}.")
         self._refresh_inventory_panel()
@@ -1418,13 +1580,7 @@ class GameApp:
         if rolled_loot:
             gained_items.extend(rolled_loot)
         if gained_items:
-            counts = Counter(gained_items)
-            display = []
-            for item_id, count in counts.items():
-                self.inventory[item_id] = self.inventory.get(item_id, 0) + count
-                name = self._item_name(item_id)
-                suffix = f" x{count}" if count > 1 else ""
-                display.append(f"{name}{suffix}")
+            display = self._grant_items(gained_items)
             self._refresh_inventory_panel()
             messages.append(f"You obtain: {', '.join(display)}.")
             requires_refresh = True
@@ -1445,12 +1601,29 @@ class GameApp:
                 if self.inventory.get(item_id, 0) <= 0:
                     continue
                 definition = self._item_definition(item_id)
-                if definition.get("category") != "weapon" and not definition.get("weapon_type"):
+                if not self._is_equippable(definition):
                     continue
-                equipped = self._equip_weapon(item_id, definition, notify=False)
+                equipped = self._equip_item(item_id, definition, notify=False)
                 if equipped:
                     messages.append(f"{self._item_name(item_id)} equipped.")
                     requires_refresh = True
+        consume_targets = effects.get("consume_item")
+        if consume_targets:
+            if isinstance(consume_targets, str):
+                consume_ids = [consume_targets]
+            elif isinstance(consume_targets, (list, tuple, set)):
+                consume_ids = [str(item) for item in consume_targets if isinstance(item, str)]
+            else:
+                consume_ids = []
+            for item_id in consume_ids:
+                if self.inventory.get(item_id, 0) <= 0:
+                    continue
+                self._consume_item_use(item_id, 1)
+                if self.inventory.get(item_id, 0) <= 0:
+                    messages.append(f"{self._item_name(item_id)} is used up.")
+                else:
+                    messages.append(f"{self._item_name(item_id)} loses a use.")
+                requires_refresh = True
         timer_rooms_value: Optional[int] = None
         raw_timer = effects.get("timer_rooms")
         if isinstance(raw_timer, (int, float)):
@@ -1476,6 +1649,12 @@ class GameApp:
                 self.stats.stamina = max(0, self.stats.stamina - cost)
                 stats_changed = True
                 messages.append(f"You expend {cost} stamina.")
+        stat_changes = effects.get("stats")
+        if isinstance(stat_changes, dict):
+            self._apply_effect_map(stat_changes)
+            if "xp" in stat_changes:
+                self._sync_level_progress()
+            stats_changed = True
         alert_delta = effects.get("alert")
         if isinstance(alert_delta, (int, float)):
             change = int(alert_delta)

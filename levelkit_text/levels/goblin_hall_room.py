@@ -1,6 +1,6 @@
 """Hallway leading to the goblin encounter."""
 
-from engine.models import OptionSpec, RoomSpec
+from engine.models import Button, RoomSpec
 
 ROOM = RoomSpec(
     id="goblin_hall",
@@ -11,8 +11,7 @@ ROOM = RoomSpec(
     ),
     background_key="goblin_yellow",
     options=[
-        OptionSpec(label="Face the goblin", battle_id="goblin_trial"),
-        OptionSpec(label="Retreat to the entrance", to="start"),
+        Button(label="Face the goblin", battle_id="goblin_trial"),
+        Button(label="Retreat to the entrance", to="start"),
     ],
 )
-

@@ -1,5 +1,6 @@
 """Content discovery utilities for the LevelKit-Text engine."""
 
+import traceback
 from importlib import import_module
 from pathlib import Path
 from typing import Dict, Tuple
@@ -37,16 +38,36 @@ def _module_name_from_path(base_package: str, path: Path) -> str:
     return f"{base_package}.{stem}"
 
 
+def _import_content_module(module_name: str, file_path: Path):
+    try:
+        return import_module(module_name)
+    except SyntaxError as exc:
+        line_number = getattr(exc, "lineno", "?")
+        raise LoaderError(
+            f"Could not load {file_path.name} because Python found a syntax problem on line "
+            f"{line_number}: {exc.msg}."
+        ) from exc
+    except Exception as exc:
+        brief = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+        raise LoaderError(
+            f"Could not run {file_path.name}. Check that file first. Problem: {brief}."
+        ) from exc
+
+
 def load_rooms() -> Dict[str, RoomSpec]:
     rooms: Dict[str, RoomSpec] = {}
-    for file_path in sorted(LEVELS_DIR.glob("*_room.py")):
+    for file_path in sorted(LEVELS_DIR.glob("*.py")):
+        if file_path.name.startswith("__"):
+            continue
         module_name = _module_name_from_path("levelkit_text.levels", file_path)
-        module = import_module(module_name)
+        module = _import_content_module(module_name, file_path)
         room = getattr(module, "ROOM", None)
         if not isinstance(room, RoomSpec):
-            raise LoaderError(f"{module_name} must define ROOM: RoomSpec")
+            raise LoaderError(
+                f"{file_path.name} must define a room called ROOM using RoomSpec(...)."
+            )
         if room.id in rooms:
-            raise LoaderError(f"Duplicate room id detected: {room.id}")
+            raise LoaderError(f"Two room files are using the same room id: '{room.id}'.")
         rooms[room.id] = room
     return rooms
 
@@ -57,12 +78,14 @@ def load_battles() -> Dict[str, BattleSpec]:
         if file_path.name.startswith("__"):
             continue
         module_name = _module_name_from_path("levelkit_text.battle_loops", file_path)
-        module = import_module(module_name)
+        module = _import_content_module(module_name, file_path)
         battle = getattr(module, "BATTLE", None)
         if not isinstance(battle, BattleSpec):
-            raise LoaderError(f"{module_name} must define BATTLE: BattleSpec")
+            raise LoaderError(
+                f"{file_path.name} must define a battle called BATTLE using BattleSpec(...)."
+            )
         if battle.id in battles:
-            raise LoaderError(f"Duplicate battle id detected: {battle.id}")
+            raise LoaderError(f"Two battle files are using the same battle id: '{battle.id}'.")
         battles[battle.id] = battle
     return battles
 

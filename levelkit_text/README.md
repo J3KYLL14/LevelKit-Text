@@ -9,10 +9,10 @@ story.
 
 ## What to edit first
 
-- `levels/` – add files ending with `_room.py` that export a `RoomSpec` named `ROOM`.
+- `levels/` – add room files with any Python filename you like, as long as they export a `RoomSpec` named `ROOM`.
 - `battle_loops/` – add battle modules that export a `BattleSpec` named `BATTLE`.
 - `assets/images/registry.py` & `assets/sounds/registry.py` – register PNG or WAV assets.
-- `game/defaults.py` – tweak starting stats, routing, and presentation constants.
+- `game/defaults.py` – tweak starting stats, routing, presentation constants, and level-up stat gains.
 - `game/items.py` & `game/weapons.py` – describe inventory items and equipment.
 - `game/theme.py` – customise UI colours, fonts, and layout spacing.
 - `game/xp.py` – adjust the XP curve to match your lesson goals.
@@ -27,8 +27,8 @@ leave it untouched.
 
 ## Creating your first room
 
-1. Create a new file in `levels/` such as `start_room.py`.
-2. Import `RoomSpec` and `OptionSpec` from `engine.models`, then define a `ROOM`
+1. Create a new file in `levels/` such as `start.py`.
+2. Import `RoomSpec` and `Button` from `engine.models`, then define a `ROOM`
    instance with a unique `id`, `title`, `body`, and list of options.
 3. Update `START_ROOM_ID` in `game/defaults.py` to match the new room id.
 
